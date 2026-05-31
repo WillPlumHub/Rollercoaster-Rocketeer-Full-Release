@@ -14,7 +14,8 @@ public class IsometricCameraPanner : MonoBehaviour {
     public Camera _mainCamera;
 
     public bool _isDragging;
-
+    public bool _manualOverride = false;
+    
     private void Awake() {
         _mainCamera = Camera.main;
     }
@@ -22,10 +23,11 @@ public class IsometricCameraPanner : MonoBehaviour {
     public void OnDrag(InputAction.CallbackContext ctx) {
         if (ctx.started) _origin = _mainCamera.ScreenToWorldPoint(Mouse.current.position.ReadValue());
         _isDragging = ctx.started || ctx.performed;
+
     }
 
     private void LateUpdate() {
-        if (!_isDragging) return;
+        if (!_isDragging || _manualOverride) return;
 
         _difference = GetMousePosition - transform.position;
         transform.position = _origin - _difference;

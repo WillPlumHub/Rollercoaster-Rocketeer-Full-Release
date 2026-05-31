@@ -9,6 +9,8 @@ public class IsometricCameraZoom : MonoBehaviour {
     public float maxZoom = 20f;
     public float minZoom = 5f;
 
+    public bool _manualOverride = false;
+
     private float _currentZoom;
     private float _scrollInput;
 
@@ -20,12 +22,10 @@ public class IsometricCameraZoom : MonoBehaviour {
     }
 
     void Update() {
-        // Apply scroll input
-        if (_scrollInput != 0f) {
+        if (_scrollInput != 0f && !_manualOverride) {
             _currentZoom = Mathf.Clamp(_currentZoom - _scrollInput * zoomSpeed, minZoom, maxZoom );
         }
 
-        // Smooth zoom
         _camera.orthographicSize = Mathf.Lerp(_camera.orthographicSize, _currentZoom, zoomSmoothness * Time.deltaTime );
     }
 

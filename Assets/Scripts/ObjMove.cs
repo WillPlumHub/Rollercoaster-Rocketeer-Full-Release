@@ -6,7 +6,6 @@ public class ObjMove : MonoBehaviour {
     public static ObjMove activeObj;
 
     public float gridSize = 1f;
-
     public float floatHeight = 1.5f;
     public float moveSmoothness = 10f;
 
@@ -18,8 +17,10 @@ public class ObjMove : MonoBehaviour {
 
     public bool verticallyDraggable = false;
 
-    public Texture2D validCursorTexture;
-    public Texture2D invalidCursorTexture;
+    public float clickThreshold = 10f;
+
+    private Vector2 _mouseDownPos;
+    private bool _mouseDragging = false;
 
     private Camera _camera;
     private bool _isHeld = false;
@@ -28,10 +29,18 @@ public class ObjMove : MonoBehaviour {
 
     private Vector3 _mouseHitPoint = Vector3.zero;
     private Vector3 _mouseHitNormal = Vector3.up;
-    private bool _mouseOverValidSurface = false;
 
     private int _defaultLayer;
     private int _heldLayer;
+
+    public Material silhouetteMaterial;
+
+    private Renderer[] renderers;
+    private Material[] originalMaterials;
+    private int[] originalQueues;
+
+    private int overlapCount = 0;   // trigger‑based overlap count
+
 
     private void Awake() {
         _camera = Camera.main;
@@ -39,28 +48,58 @@ public class ObjMove : MonoBehaviour {
 
         _defaultLayer = LayerMask.NameToLayer("UnHeldObject");
         _heldLayer = LayerMask.NameToLayer("HeldObject");
+
+        if (gridSize < 0) gridSize = 0;
+
+        renderers = GetComponentsInChildren<Renderer>();
+        originalMaterials = new Material[renderers.Length];
+        originalQueues = new int[renderers.Length];
+
+        for (int i = 0; i < renderers.Length; i++) {
+            originalMaterials[i] = renderers[i].material;
+            originalQueues[i] = renderers[i].material.renderQueue;
+        }
     }
+
 
     private void Update() {
         if (Mouse.current == null) return;
 
         UpdateMouseHitPoint();
 
+        // click vs drag
         if (Mouse.current.leftButton.wasPressedThisFrame) {
-            if (_isHeld && _canPlace) PlaceObject();
-            else if (activeObj == null) TryPickUpObject();
+            _mouseDownPos = Mouse.current.position.ReadValue();
+            _mouseDragging = false;
+        }
+
+        if (Mouse.current.leftButton.isPressed) {
+            float dist = Vector2.Distance(_mouseDownPos, Mouse.current.position.ReadValue());
+            if (dist > clickThreshold)
+                _mouseDragging = true;
+        }
+
+        if (Mouse.current.leftButton.wasReleasedThisFrame) {
+            if (!_mouseDragging) {
+                if (_isHeld && _canPlace) PlaceObject();
+                else if (activeObj == null) TryPickUpObject();
+            }
         }
 
         if (_isHeld) MoveToMouse();
 
-        posLims();
+        // --- silhouette + render-on-top condition (trigger-based) ---
+        bool shouldHighlight = _isHeld && !verticallyDraggable && overlapCount > 0;
 
-        // --- CURSOR FEEDBACK ---
-        if (_mouseOverValidSurface)
-            Cursor.SetCursor(validCursorTexture, Vector2.zero, CursorMode.Auto);
-        else
-            Cursor.SetCursor(invalidCursorTexture, Vector2.zero, CursorMode.Auto);
+        if (shouldHighlight) {
+            ApplySilhouetteAndOnTop();
+        } else {
+            RestoreMaterialsAndQueue();
+        }
+
+        posLims();
     }
+
 
     private void posLims() {
         Vector3 pos = transform.position;
@@ -77,6 +116,7 @@ public class ObjMove : MonoBehaviour {
         transform.position = pos;
     }
 
+
     private void TryPickUpObject() {
         Ray ray = _camera.ScreenPointToRay(Mouse.current.position.ReadValue());
 
@@ -91,6 +131,7 @@ public class ObjMove : MonoBehaviour {
         }
     }
 
+
     private void PlaceObject() {
         _isHeld = false;
         _canPlace = true;
@@ -104,20 +145,23 @@ public class ObjMove : MonoBehaviour {
             pos.x = Mathf.Round(pos.x / gridSize) * gridSize;
             pos.z = Mathf.Round(pos.z / gridSize) * gridSize;
         }
+
         pos.y -= floatHeight;
         transform.position = pos;
+
+        if (GetComponent<FlagSetter>() as FlagSetter != null) {
+            GetComponent<FlagSetter>().TryTriggerFlag();
+        }
+
+        RestoreMaterialsAndQueue();
     }
+
 
     private void MoveToMouse() {
         Vector3 mousePos = _mouseHitPoint;
 
-        // Safety check
-        if (float.IsInfinity(mousePos.x) ||
-            float.IsInfinity(mousePos.y) ||
-            float.IsInfinity(mousePos.z))
-            return;
+        if (float.IsInfinity(mousePos.x) || float.IsInfinity(mousePos.y) || float.IsInfinity(mousePos.z)) return;
 
-        // Snap to grid first
         Vector3 target = (gridSize > 0) ? SnapToGrid(mousePos) : mousePos;
 
         bool mouseOnGround = _mouseHitNormal.y > 0.7f;
@@ -125,23 +169,20 @@ public class ObjMove : MonoBehaviour {
         if (!verticallyDraggable) {
             _canPlace = mouseOnGround;
 
-            if (mouseOnGround) {
+            if (mouseOnGround)
                 target.y = mousePos.y + _halfHeight + floatHeight;
-            } else {
-                // Keep current height when over void
+            else
                 target.y = transform.position.y;
-            }
         } else {
             _canPlace = true;
-            target.y = mousePos.y + _halfHeight + floatHeight;
-            target.y = Mathf.Round(target.y / gridSize) * gridSize;
+            target.y = Mathf.Round((mousePos.y + _halfHeight + floatHeight) / gridSize) * gridSize;
         }
 
-        // ⭐ CRITICAL FIX: Project BEFORE moving
         target = ProjectToBounds(target);
 
         transform.position = Vector3.Lerp(transform.position, target, Time.deltaTime * moveSmoothness);
     }
+
 
     private Vector3 SnapToGrid(Vector3 pos) {
         pos.x = Mathf.Round(pos.x / gridSize) * gridSize;
@@ -149,13 +190,14 @@ public class ObjMove : MonoBehaviour {
         return pos;
     }
 
+
     private void SetLayerRecursive(GameObject obj, int layer) {
         obj.layer = layer;
         foreach (Transform child in obj.transform)
             SetLayerRecursive(child.gameObject, layer);
     }
 
-    // --- EDGE PROJECTION FUNCTION ---
+
     private Vector3 ProjectToBounds(Vector3 pos) {
         Vector3 p = pos;
 
@@ -171,6 +213,7 @@ public class ObjMove : MonoBehaviour {
         return p;
     }
 
+
     private void UpdateMouseHitPoint() {
         Ray ray = _camera.ScreenPointToRay(Mouse.current.position.ReadValue());
         int mask = placementLayerMask & ~(1 << _heldLayer);
@@ -178,68 +221,50 @@ public class ObjMove : MonoBehaviour {
         if (Physics.Raycast(ray, out RaycastHit hit, Mathf.Infinity, mask)) {
             _mouseHitPoint = hit.point;
             _mouseHitNormal = hit.normal;
-            _mouseOverValidSurface = true;
             return;
         }
 
-        // --- FALLBACK: infinite ground plane ---
         Plane groundPlane = new Plane(Vector3.up, Vector3.zero);
 
         if (groundPlane.Raycast(ray, out float dist)) {
             _mouseHitPoint = ray.GetPoint(dist);
             _mouseHitNormal = Vector3.up;
-            _mouseOverValidSurface = false;
             return;
         }
 
         _mouseHitPoint = transform.position;
         _mouseHitNormal = Vector3.up;
-        _mouseOverValidSurface = false;
     }
 
-    private void OnDrawGizmos() {
-        if (_mouseHitPoint != Vector3.zero) {
-            Vector3 mousePos = _mouseHitPoint;
 
-            if (float.IsInfinity(mousePos.x) ||
-                float.IsInfinity(mousePos.y) ||
-                float.IsInfinity(mousePos.z))
-                Gizmos.color = Color.red;
-            else
-                Gizmos.color = Color.cyan;
-
-            Gizmos.DrawSphere(_mouseHitPoint, 0.25f);
+    private void ApplySilhouetteAndOnTop() {
+        for (int i = 0; i < renderers.Length; i++) {
+            renderers[i].material = silhouetteMaterial;
+            renderers[i].material.renderQueue = 4000;
         }
+    }
 
+    private void RestoreMaterialsAndQueue() {
+        for (int i = 0; i < renderers.Length; i++) {
+            renderers[i].material = originalMaterials[i];
+            renderers[i].material.renderQueue = originalQueues[i];
+        }
+    }
+
+
+    private void OnTriggerEnter(Collider other) {
         if (!_isHeld) return;
 
-        Gizmos.color = Color.yellow;
-        Vector3 origin = transform.position;
+        if (other.GetComponentInParent<ObjMove>() == this) return;
 
-        if (Physics.Raycast(origin, Vector3.down, out RaycastHit hit, 50f, placementLayerMask)) {
-            Gizmos.DrawLine(origin, hit.point);
-            Gizmos.DrawSphere(hit.point, 0.2f);
-        }
-
-        Gizmos.DrawSphere(origin, 0.15f);
+        overlapCount++;
     }
 
-    private void OnDrawGizmosSelected() {
-        if (xLim == Vector2.zero && yLim == Vector2.zero && zLim == Vector2.zero) return;
+    private void OnTriggerExit(Collider other) {
+        if (!_isHeld) return;
 
-        Gizmos.color = Color.green;
+        if (other.GetComponentInParent<ObjMove>() == this) return;
 
-        float cx = (xLim.x + xLim.y) * 0.5f;
-        float cy = (yLim.x + yLim.y) * 0.5f;
-        float cz = (zLim.x + zLim.y) * 0.5f;
-
-        float sx = Mathf.Abs(xLim.y - xLim.x);
-        float sy = Mathf.Abs(yLim.y - yLim.x);
-        float sz = Mathf.Abs(zLim.y - zLim.x);
-
-        Vector3 center = new Vector3(cx, cy, cz);
-        Vector3 size = new Vector3(sx, sy, sz);
-
-        Gizmos.DrawWireCube(center, size);
+        overlapCount--;
     }
 }
