@@ -1,4 +1,5 @@
-﻿using UnityEngine;
+﻿using System.Collections;
+using UnityEngine;
 using UnityEngine.InputSystem;
 
 public class ObjMove : MonoBehaviour {
@@ -71,12 +72,13 @@ public class ObjMove : MonoBehaviour {
         if (Mouse.current.leftButton.wasPressedThisFrame) {
             _mouseDownPos = Mouse.current.position.ReadValue();
             _mouseDragging = false;
-        }
-
-        if (Mouse.current.leftButton.isPressed) {
-            float dist = Vector2.Distance(_mouseDownPos, Mouse.current.position.ReadValue());
-            if (dist > clickThreshold)
-                _mouseDragging = true;
+        
+            Ray ray = _camera.ScreenPointToRay(Mouse.current.position.ReadValue());
+            if (Physics.Raycast(ray, out RaycastHit hit, Mathf.Infinity, placementLayerMask)) {
+                if (hit.collider.GetComponentInParent<ObjMove>() == this) {
+                    PlayerClickMove.manualOverride = true;
+                }
+            }
         }
 
         if (Mouse.current.leftButton.wasReleasedThisFrame) {
@@ -123,6 +125,7 @@ public class ObjMove : MonoBehaviour {
         if (Physics.Raycast(ray, out RaycastHit hit, Mathf.Infinity, placementLayerMask & ~(1 << _heldLayer))) {
             if (hit.collider.GetComponentInParent<ObjMove>() == this) {
                 activeObj = this;
+                PlayerClickMove.manualOverride = true;
                 _isHeld = true;
                 _canPlace = true;
 
@@ -137,6 +140,7 @@ public class ObjMove : MonoBehaviour {
         _canPlace = true;
         activeObj = null;
 
+        StartCoroutine(releaseOverrideNextFrame());
         SetLayerRecursive(gameObject, _defaultLayer);
 
         Vector3 pos = transform.position;
@@ -156,6 +160,10 @@ public class ObjMove : MonoBehaviour {
         RestoreMaterialsAndQueue();
     }
 
+    private IEnumerator releaseOverrideNextFrame() {
+        yield return null;
+        PlayerClickMove.manualOverride = false;
+    }
 
     private void MoveToMouse() {
         Vector3 mousePos = _mouseHitPoint;

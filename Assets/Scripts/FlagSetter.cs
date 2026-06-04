@@ -12,6 +12,8 @@ public class FlagSetter : MonoBehaviour {
     public Vector2 _yRotRange = Vector2.zero;
     public Vector2 _zRotRange = Vector2.zero;
 
+    public GameObject _triggerObj;
+
     public MonoBehaviour _targetScript;
     private IFlagAction _action;
 
@@ -28,7 +30,11 @@ public class FlagSetter : MonoBehaviour {
             IsWithinRange(NormalizeAngle(transform.localEulerAngles.x), _xRotRange) &&
             IsWithinRange(NormalizeAngle(transform.localEulerAngles.y), _yRotRange) &&
             IsWithinRange(NormalizeAngle(transform.localEulerAngles.z), _zRotRange)) {
-            
+
+            if (_triggerObj != null /*&& it's being used on this*/) {
+
+            }
+
             Debug.Log($"{gameObject.name} is triggering a flag");
 
             _action?.RunAction();

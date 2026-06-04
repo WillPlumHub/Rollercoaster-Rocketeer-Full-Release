@@ -1,154 +1,140 @@
-using UnityEngine;
+﻿using UnityEngine;
 using UnityEngine.InputSystem;
 
 public class ObjRotation : MonoBehaviour {
-    public bool _isClicked = false;
 
     [Header("Drag")]
     public float rotationSpeed = 200f;
     public float maxDragSpeed = 360f;
 
     [Header("Momentum")]
-    public float momentumThreshold = 30f;
+    public float momentumEndThreshold = 20f;
     public float deceleration = 180f;
     public float maxMomentumSpeed = 720f;
     [Range(0.01f, 1f)]
-    private float velocitySmoothing = 0.25f;
+    public float dragSmoothinTime = 0.25f;
 
-    [Header("Rotation Rules")]
-    public Vector3 rotationAxis = Vector3.up;
+    [Header("Yaw Limits (Y axis)")]
+    public bool useYawLimits = false;
+    public float minYaw = -90f;
+    public float maxYaw = 90f;
+
+    [Header("Roll Limits (Z axis)")]
+    public bool useRollLimits = false;
+    public float minRoll = -45f;
+    public float maxRoll = 45f;
+
+    [Header("Rotation Point")]
     public Transform rotationPoint;
 
-    [Header("Limits")]
-    public bool useLimits = false;
-    public float minAngle = -45f;
-    public float maxAngle = 45f;
-
-    private Vector2 _lastMousePos;
     private Camera _camera;
+    private bool dragging = false;
 
-    private float currentAngularVelocity = 0f;
-
-    // reference direction for measuring angle
-    private Vector3 _referenceDir;
+    private Vector2 lastMouse;
+    private Vector2 angularVelocity;   // x = yaw, y = roll
+    private float yawAngle = 0f;
+    private float rollAngle = 0f;
 
     private void Awake() {
         _camera = Camera.main;
-        if (rotationAxis != Vector3.zero) rotationAxis.Normalize();
-
-        // store a reference direction to measure angles against
-        if (rotationPoint != null) {
-            _referenceDir = (transform.position - rotationPoint.position).normalized;
-        } else {
-            // choose a stable local axis as reference (forward works well)
-            _referenceDir = transform.forward;
-        }
     }
 
     private void Update() {
         if (Mouse.current == null) return;
 
         if (Mouse.current.leftButton.wasPressedThisFrame) {
-            _isClicked = HitCheck();
+            if (HitCheck()) {
+                dragging = true;
+                lastMouse = Mouse.current.position.ReadValue();
 
-            if (_isClicked) {
-                _lastMousePos = Mouse.current.position.ReadValue();
+                // Only THIS object overrides camera
                 _camera.GetComponent<IsometricCameraPanner>()._manualOverride = true;
             }
         }
 
         if (Mouse.current.leftButton.wasReleasedThisFrame) {
-            if (_isClicked) {
-                if (GetComponent<FlagSetter>() as FlagSetter != null) {
-                    GetComponent<FlagSetter>().TryTriggerFlag();
-                }
-                if (Mathf.Abs(currentAngularVelocity) < momentumThreshold)
-                    currentAngularVelocity = 0f;
-            }            
 
-            _isClicked = false;
+            if (Mathf.Abs(angularVelocity.x) < momentumEndThreshold)
+                angularVelocity.x = 0f;
+
+            if (Mathf.Abs(angularVelocity.y) < momentumEndThreshold)
+                angularVelocity.y = 0f;
+
+            dragging = false;
+
+            // Only THIS object stops override
             _camera.GetComponent<IsometricCameraPanner>()._manualOverride = false;
         }
     }
 
     private void LateUpdate() {
-        if (_isClicked)
-            HandleDragRotation();
+        if (dragging)
+            ApplyDrag();
         else
-            HandleMomentumRotation();
+            ApplyMomentum();
     }
 
-    private void HandleDragRotation() {
-        Vector2 currentMousePos = Mouse.current.position.ReadValue();
-        float deltaX = currentMousePos.x - _lastMousePos.x;
+    private void ApplyDrag() {
+        Vector2 delta = Mouse.current.position.ReadValue() - lastMouse;
+        lastMouse = Mouse.current.position.ReadValue();
 
-        float angle = deltaX * -rotationSpeed * Time.deltaTime;
-        float rawVelocity = angle / Time.deltaTime;
+        angularVelocity = Vector2.Lerp(angularVelocity, delta * rotationSpeed, dragSmoothinTime);
+        angularVelocity = Vector2.ClampMagnitude(angularVelocity, maxMomentumSpeed);
 
-        currentAngularVelocity = Mathf.Lerp(currentAngularVelocity, rawVelocity, velocitySmoothing);
-        currentAngularVelocity = Mathf.Clamp(currentAngularVelocity, -maxMomentumSpeed, maxMomentumSpeed);
+        Vector2 applied = Vector2.ClampMagnitude(angularVelocity, maxDragSpeed);
 
-        float appliedVelocity = Mathf.Clamp(currentAngularVelocity, -maxDragSpeed, maxDragSpeed);
-
-        TryApplyRotation(appliedVelocity * Time.deltaTime);
-
-        _lastMousePos = currentMousePos;
+        Rotate(applied * Time.deltaTime);
     }
 
-    private void HandleMomentumRotation() {
-        if (Mathf.Abs(currentAngularVelocity) <= 0.01f)
-            return;
+    private void ApplyMomentum() {
+        if (angularVelocity.sqrMagnitude < 0.01f) return;
 
-        float angle = currentAngularVelocity * Time.deltaTime;
+        Rotate(angularVelocity * Time.deltaTime);
+        angularVelocity = Vector2.MoveTowards(angularVelocity, Vector2.zero, deceleration * Time.deltaTime);
+    }
 
-        if (TryApplyRotation(angle)) {
-            float decel = deceleration * Time.deltaTime;
-            currentAngularVelocity = Mathf.MoveTowards(currentAngularVelocity, 0f, decel);
+    private void Rotate(Vector2 delta) {
+        float yawDelta = -delta.x;
+        float rollDelta = -delta.y;
+
+        // --- YAW LIMITS ---
+        if (useYawLimits) {
+            float nextYaw = yawAngle + yawDelta;
+            if (nextYaw < minYaw || nextYaw > maxYaw)
+                yawDelta = 0f;
+            else
+                yawAngle = nextYaw;
         } else {
-            currentAngularVelocity = 0f;
-        }
-    }
-
-    private bool TryApplyRotation(float angle) {
-        if (!useLimits) {
-            ApplyRotation(angle);
-            return true;
+            yawAngle += yawDelta;
         }
 
-        float before = GetCurrentAngle();
-
-        ApplyRotation(angle);
-
-        float after = GetCurrentAngle();
-
-        if (after < minAngle - 0.001f || after > maxAngle + 0.001f) {
-            // undo rotation if out of bounds
-            ApplyRotation(-angle);
-            return false;
-        }
-
-        return true;
-    }
-
-    private float GetCurrentAngle() {
-        Vector3 currentDir;
-
-        if (rotationPoint != null) {
-            currentDir = (transform.position - rotationPoint.position).normalized;
+        // --- ROLL LIMITS ---
+        if (useRollLimits) {
+            float nextRoll = rollAngle + rollDelta;
+            if (nextRoll < minRoll || nextRoll > maxRoll)
+                rollDelta = 0f;
+            else
+                rollAngle = nextRoll;
         } else {
-            currentDir = transform.forward;
+            rollAngle += rollDelta;
         }
 
-        // signed angle around rotationAxis
-        return Vector3.SignedAngle(_referenceDir, currentDir, rotationAxis);
+        Vector3 pivot = rotationPoint ? rotationPoint.position : transform.position;
+
+        // USE PIVOT AXES IF PIVOT EXISTS
+        Vector3 yawAxis = rotationPoint ? rotationPoint.up : transform.up;
+        Vector3 rollAxis = rotationPoint ? rotationPoint.forward : transform.forward;
+
+        transform.RotateAround(pivot, yawAxis, yawDelta);
+        transform.RotateAround(pivot, rollAxis, rollDelta);
+
+        // Lock X rotation
+        Vector3 e = transform.eulerAngles;
+        e.x = 0f;
+        transform.eulerAngles = e;
     }
 
-    private void ApplyRotation(float angle) {
-        if (rotationPoint != null)
-            transform.RotateAround(rotationPoint.position, rotationAxis, angle);
-        else
-            transform.Rotate(rotationAxis, angle, Space.World);
-    }
+
 
     public bool HitCheck() {
         Ray ray = _camera.ScreenPointToRay(Mouse.current.position.ReadValue());

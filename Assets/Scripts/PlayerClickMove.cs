@@ -4,14 +4,16 @@ using UnityEngine.InputSystem;
 
 [RequireComponent(typeof(NavMeshAgent))]
 public class PlayerClickMove : MonoBehaviour {
+
+    public static bool manualOverride = false;
+
     private NavMeshAgent _agent;
     private RaycastHit _hitInfo;
 
-    [Header("Settings")]
     public float dragThreshold = 10f;
+    //public bool manualOverride = false;
 
     private Vector2 _mouseDownPos;
-    private bool _isMouseDown;
 
     void Start() {
         _agent = GetComponent<NavMeshAgent>();
@@ -19,24 +21,19 @@ public class PlayerClickMove : MonoBehaviour {
 
     void Update() {
         if (Mouse.current.leftButton.wasPressedThisFrame) {
-            _isMouseDown = true;
             _mouseDownPos = Mouse.current.position.ReadValue();
         }
 
-        if (Mouse.current.leftButton.wasReleasedThisFrame) {
-            if (!_isMouseDown) return;
-            _isMouseDown = false;
-
+        if (Mouse.current.leftButton.wasReleasedThisFrame && !manualOverride) {
+            
             Vector2 releasePos = Mouse.current.position.ReadValue();
             float distance = Vector2.Distance(_mouseDownPos, releasePos);
 
-            if (distance > dragThreshold)
-                return;
+            if (distance > dragThreshold) return;
 
             TryMoveToCursor();
         }
 
-        // Stop agent when reaching destination
         if (!_agent.pathPending && _agent.remainingDistance <= _agent.stoppingDistance) {
             if (!_agent.hasPath || _agent.velocity.sqrMagnitude == 0f)
                 _agent.isStopped = true;
