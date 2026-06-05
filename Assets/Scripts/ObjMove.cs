@@ -1,6 +1,8 @@
 ﻿using System.Collections;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.Splines;
+using Unity.Mathematics; 
 
 public class ObjMove : MonoBehaviour {
 
@@ -130,6 +132,7 @@ public class ObjMove : MonoBehaviour {
                 _canPlace = true;
 
                 SetLayerRecursive(gameObject, _heldLayer);
+                Destroy(gameObject.transform.GetChild(0).gameObject);
             }
         }
     }
@@ -149,9 +152,43 @@ public class ObjMove : MonoBehaviour {
             pos.x = Mathf.Round(pos.x / gridSize) * gridSize;
             pos.z = Mathf.Round(pos.z / gridSize) * gridSize;
         }
+        if (!verticallyDraggable)
+        {
+            pos.y -= floatHeight;
+        }
+        else
+        {
+            GameObject SplineSupport = new GameObject("SplineSupport");
+            SplineSupport.transform.parent = this.gameObject.transform;
+            SplineContainer RollerSupport = SplineSupport.AddComponent<SplineContainer>();
+            RollerSupport.Spline = new Spline();
+            RollerSupport.Spline.AddRange(new float3[] { new(pos.x, pos.y, pos.z), new(pos.x, pos.y-floatHeight - 1.4f, pos.z) });
+            SplineExtrude SupportExtrude = SplineSupport.AddComponent<SplineExtrude>();
+            SupportExtrude.Container = RollerSupport;
+            bool SupportMesh = SupportExtrude.TryGetComponent<MeshFilter>(out var meshFilter);
+            if (SupportMesh)
+            {
+                if(meshFilter.sharedMesh == null)
+                {
+                    var extrudeMesh = new Mesh();
+                    extrudeMesh.name = "support mesh";
+                    meshFilter.sharedMesh = extrudeMesh;
+                }
+                SupportExtrude.Radius = 0.25f;
+                SupportExtrude.SegmentsPerUnit = 20;
+                SupportExtrude.RebuildOnSplineChange = true;
+                SupportExtrude.Sides = 8;
+                SupportExtrude.Range = new float2(0, 100);
 
-        pos.y -= floatHeight;
-        transform.position = pos;
+                bool hasMeshRenderer = SupportExtrude.TryGetComponent<MeshRenderer>(out var meshRenderer);
+                if (hasMeshRenderer)
+                {
+                    meshRenderer.material = new Material(Shader.Find("Standard"));
+                }
+                SupportExtrude.Rebuild();
+            }
+        }
+            transform.position = pos;
 
         if (GetComponent<FlagSetter>() as FlagSetter != null) {
             GetComponent<FlagSetter>().TryTriggerFlag();
@@ -183,6 +220,14 @@ public class ObjMove : MonoBehaviour {
                 target.y = transform.position.y;
         } else {
             _canPlace = true;
+            if (Keyboard.current.wKey.wasPressedThisFrame)
+            {
+                floatHeight += 2f;
+            }
+            else if (Keyboard.current.sKey.wasPressedThisFrame)
+            {
+                floatHeight -= 2f;
+            }
             target.y = Mathf.Round((mousePos.y + _halfHeight + floatHeight) / gridSize) * gridSize;
         }
 
