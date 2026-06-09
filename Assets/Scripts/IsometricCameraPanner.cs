@@ -29,7 +29,7 @@ public class IsometricCameraPanner : MonoBehaviour {
     }
 
     private void LateUpdate() {
-        Debug.Log("Manual override = " + _manualOverride);
+        //Debug.Log("Manual override = " + _manualOverride);
 
         if (!_isDragging || _manualOverride) return;
 

@@ -132,7 +132,9 @@ public class ObjMove : MonoBehaviour {
                 _canPlace = true;
 
                 SetLayerRecursive(gameObject, _heldLayer);
-                Destroy(gameObject.transform.GetChild(0).gameObject);
+                if (gameObject.transform.childCount == 1) {
+                    Destroy(gameObject.transform.GetChild(0).gameObject);
+                }
             }
         }
     }
