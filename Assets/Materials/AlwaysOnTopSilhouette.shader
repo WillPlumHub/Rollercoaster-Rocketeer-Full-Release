@@ -1,47 +1,57 @@
-Shader "Custom/AlwaysOnTopSilhouette"
+Shader "Custom/URPAlwaysOnTopSilhouette"
 {
     Properties
     {
-        _Color ("Color", Color) = (1,1,1,1)
+        _Color("Color", Color) = (1,1,1,1)
     }
 
     SubShader
     {
-        Tags { "Queue"="Overlay" "RenderType"="Opaque" }
+        Tags
+        {
+            "RenderPipeline"="UniversalPipeline"
+            "Queue"="Overlay"
+            "RenderType"="Opaque"
+        }
 
         Pass
         {
-            ZTest Always      // ignore depth buffer
-            ZWrite Off        // don't write depth
+            Name "AlwaysOnTop"
+            Tags { "LightMode"="UniversalForward" }
+
+            ZWrite Off
+            ZTest Always
             Cull Off
 
-            CGPROGRAM
+            HLSLPROGRAM
             #pragma vertex vert
             #pragma fragment frag
-            #include "UnityCG.cginc"
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 
             float4 _Color;
 
-            struct appdata {
-                float4 vertex : POSITION;
-            };
-
-            struct v2f {
-                float4 pos : SV_POSITION;
-            };
-
-            v2f vert (appdata v)
+            struct Attributes
             {
-                v2f o;
-                o.pos = UnityObjectToClipPos(v.vertex);
-                return o;
+                float4 positionOS : POSITION;
+            };
+
+            struct Varyings
+            {
+                float4 positionHCS : SV_POSITION;
+            };
+
+            Varyings vert (Attributes IN)
+            {
+                Varyings OUT;
+                OUT.positionHCS = TransformObjectToHClip(IN.positionOS.xyz);
+                return OUT;
             }
 
-            float4 frag (v2f i) : SV_Target
+            float4 frag (Varyings IN) : SV_Target
             {
                 return _Color;
             }
-            ENDCG
+            ENDHLSL
         }
     }
 }

@@ -1,279 +1,229 @@
-﻿using System.Collections;
+﻿// Held object height is triggering
+
+using System.Collections;
 using UnityEngine;
 using UnityEngine.InputSystem;
-using UnityEngine.Splines;
-using Unity.Mathematics; 
+using UnityEngine.Rendering;
 
 public class ObjMove : MonoBehaviour {
 
     public static ObjMove activeObj;
 
+    [Header("Basic Object Settings")]
     public float gridSize = 1f;
     public float floatHeight = 1.5f;
-    public float moveSmoothness = 10f;
-
-    public LayerMask placementLayerMask = ~0;
-
-    public Vector2 xLim;
-    public Vector2 yLim;
-    public Vector2 zLim;
-
     public bool verticallyDraggable = false;
+    public float maxRaiseHeight = 100f;
+    public LayerMask layerMask = 6;
 
-    public float clickThreshold = 10f;
+    [Header("Position Limits (Min, Max)")]
+    public Vector2 xLim, yLim, zLim;
 
+    [Header("Render on Top Settings")]
+    public Material renderOnTopMaterial;
+    public Material defaultMaterial;
+    public RenderQueue queue = RenderQueue.Background; // Base queue
+    [Range(-20, 20)] public int queueOffset = 0; // Small offset to control order of objects on the same queue
+    private Material[][] originalMaterials; // per renderer
+
+    [Header("Private Variables")]
+    private float clickThreshold = 10f;
+    private float moveSmoothness = 10f;
     private Vector2 _mouseDownPos;
     private bool _mouseDragging = false;
-
-    private Camera _camera;
-    private bool _isHeld = false;
-    private bool _canPlace = false;
-    private float _halfHeight;
+        
+    private bool _isObjectHeld = false;
+    private bool _canPlaceObject = false;
+    private float _halfHeldObjectHeight;
 
     private Vector3 _mouseHitPoint = Vector3.zero;
     private Vector3 _mouseHitNormal = Vector3.up;
 
-    private int _defaultLayer;
-    private int _heldLayer;
-
-    public Material silhouetteMaterial;
-
+    private Camera _camera;
+    private LineRenderer lr; 
     private Renderer[] renderers;
-    private Material[] originalMaterials;
-    private int[] originalQueues;
-
-    private int overlapCount = 0;   // trigger‑based overlap count
-
 
     private void Awake() {
         _camera = Camera.main;
-        _halfHeight = transform.localScale.y / 2f;
-
-        _defaultLayer = LayerMask.NameToLayer("UnHeldObject");
-        _heldLayer = LayerMask.NameToLayer("HeldObject");
-
-        if (gridSize < 0) gridSize = 0;
+        _halfHeldObjectHeight = transform.localScale.y / 2f;
+        layerMask = ~layerMask;
 
         renderers = GetComponentsInChildren<Renderer>();
-        originalMaterials = new Material[renderers.Length];
-        originalQueues = new int[renderers.Length];
 
+        // Cache original materials for each renderer
+        originalMaterials = new Material[renderers.Length][];
         for (int i = 0; i < renderers.Length; i++) {
-            originalMaterials[i] = renderers[i].material;
-            originalQueues[i] = renderers[i].material.renderQueue;
+            var mats = renderers[i].materials;
+            originalMaterials[i] = new Material[mats.Length];
+            for (int j = 0; j < mats.Length; j++) {
+                originalMaterials[i][j] = mats[j];
+            }
         }
+
+        lr = gameObject.AddComponent<LineRenderer>();
+        if (gridSize < 0) gridSize = 0;
     }
 
 
     private void Update() {
         if (Mouse.current == null) return;
 
-        UpdateMouseHitPoint();
+        if (activeObj == this) {
+            Vector3 start = transform.position;
+            Vector3 end = start + Vector3.down * 10f; // ray length
+            lr.SetPosition(0, start);
+            lr.SetPosition(1, end);
+        }
 
-        // click vs drag
+        Debug.Log("FloatHeight: " + floatHeight + "");
+
+        RenderOnTop();
+        UpdateMouseHitPoint();
+        ClickControl();
+    }
+
+    //
+    void ClickControl() {
         if (Mouse.current.leftButton.wasPressedThisFrame) {
             _mouseDownPos = Mouse.current.position.ReadValue();
             _mouseDragging = false;
-        
             Ray ray = _camera.ScreenPointToRay(Mouse.current.position.ReadValue());
-            if (Physics.Raycast(ray, out RaycastHit hit, Mathf.Infinity, placementLayerMask)) {
-                if (hit.collider.GetComponentInParent<ObjMove>() == this) {
-                    PlayerClickMove.manualOverride = true;
-                }
+            if (Physics.Raycast(ray, out RaycastHit hit, Mathf.Infinity)) {
+                if (hit.collider.GetComponentInParent<ObjMove>() == this) PlayerClickMove.manualOverride = true;
             }
+        }
+
+        if (Mouse.current.leftButton.isPressed) {
+            float dist = Vector2.Distance(Mouse.current.position.ReadValue(), _mouseDownPos);
+            if (dist > clickThreshold) _mouseDragging = true;
         }
 
         if (Mouse.current.leftButton.wasReleasedThisFrame) {
-            if (!_mouseDragging) {
-                if (_isHeld && _canPlace) PlaceObject();
-                else if (activeObj == null) TryPickUpObject();
-            }
+            if (_mouseDragging) return;
+
+            if (_isObjectHeld && _canPlaceObject) PlaceObject();
+            else if (activeObj == null) TryPickUpObject();
         }
 
-        if (_isHeld) MoveToMouse();
-
-        // --- silhouette + render-on-top condition (trigger-based) ---
-        bool shouldHighlight = _isHeld && !verticallyDraggable && overlapCount > 0;
-
-        if (shouldHighlight) {
-            ApplySilhouetteAndOnTop();
-        } else {
-            RestoreMaterialsAndQueue();
-        }
-
-        posLims();
+        if (_isObjectHeld) MoveToMouse();
+        transform.position = ClampToBounds(transform.position);
     }
 
-
-    private void posLims() {
-        Vector3 pos = transform.position;
-
-        if (xLim != Vector2.zero)
+    // Clamp Held Object to it's Position Bounds
+    private Vector3 ClampToBounds(Vector3 pos) {
+        if (xLim != Vector2.zero) {
             pos.x = Mathf.Clamp(pos.x, xLim.x, xLim.y);
-
-        if (yLim != Vector2.zero)
+        }
+        if (yLim != Vector2.zero) {
             pos.y = Mathf.Clamp(pos.y, yLim.x, yLim.y);
-
-        if (zLim != Vector2.zero)
+        }
+        if (zLim != Vector2.zero) {
             pos.z = Mathf.Clamp(pos.z, zLim.x, zLim.y);
-
-        transform.position = pos;
+        }
+        return pos;
     }
 
-
+    // 
     private void TryPickUpObject() {
-        Ray ray = _camera.ScreenPointToRay(Mouse.current.position.ReadValue());
+        Ray ray = _camera.ScreenPointToRay(Mouse.current.position.ReadValue()); // REUSE FROM OTHER INSTANCES???
 
-        if (Physics.Raycast(ray, out RaycastHit hit, Mathf.Infinity, placementLayerMask & ~(1 << _heldLayer))) {
-            if (hit.collider.GetComponentInParent<ObjMove>() == this) {
+        if (Physics.Raycast(ray, out RaycastHit hit, Mathf.Infinity, layerMask)) {
+            if (hit.collider.GetComponentInParent<ObjMove>() == this) { // Check Parent to account for clicking Child of intended object
                 activeObj = this;
                 PlayerClickMove.manualOverride = true;
-                _isHeld = true;
-                _canPlace = true;
+                _isObjectHeld = true;
+                _canPlaceObject = true;
+                DropLine();
 
-                SetLayerRecursive(gameObject, _heldLayer);
-                if (gameObject.transform.childCount == 1) {
-                    Destroy(gameObject.transform.GetChild(0).gameObject);
-                }
+                gameObject.layer = 6;
+                // Change collision layer
             }
         }
     }
 
-
+    // 
     private void PlaceObject() {
-        _isHeld = false;
-        _canPlace = true;
-        activeObj = null;
+        _isObjectHeld = false; _canPlaceObject = true; activeObj = null;
 
         StartCoroutine(releaseOverrideNextFrame());
-        SetLayerRecursive(gameObject, _defaultLayer);
+
+        if (gridSize > 0) transform.position = ClampToBounds(transform.position);
 
         Vector3 pos = transform.position;
 
-        if (gridSize > 0) {
-            pos.x = Mathf.Round(pos.x / gridSize) * gridSize;
-            pos.z = Mathf.Round(pos.z / gridSize) * gridSize;
-        }
-        if (!verticallyDraggable)
-        {
+        /*if (!verticallyDraggable) { // Lower object back down held amount when placed
             pos.y -= floatHeight;
-        }
-        else
-        {
-            GameObject SplineSupport = new GameObject("SplineSupport");
-            SplineSupport.transform.parent = this.gameObject.transform;
-            SplineContainer RollerSupport = SplineSupport.AddComponent<SplineContainer>();
-            RollerSupport.Spline = new Spline();
-            RollerSupport.Spline.AddRange(new float3[] { new(pos.x, pos.y, pos.z), new(pos.x, pos.y-floatHeight - 1.4f, pos.z) });
-            SplineExtrude SupportExtrude = SplineSupport.AddComponent<SplineExtrude>();
-            SupportExtrude.Container = RollerSupport;
-            bool SupportMesh = SupportExtrude.TryGetComponent<MeshFilter>(out var meshFilter);
-            if (SupportMesh)
-            {
-                if(meshFilter.sharedMesh == null)
-                {
-                    var extrudeMesh = new Mesh();
-                    extrudeMesh.name = "support mesh";
-                    meshFilter.sharedMesh = extrudeMesh;
-                }
-                SupportExtrude.Radius = 0.25f;
-                SupportExtrude.SegmentsPerUnit = 20;
-                SupportExtrude.RebuildOnSplineChange = true;
-                SupportExtrude.Sides = 8;
-                SupportExtrude.Range = new float2(0, 100);
+        }*/
+        
+        transform.position = pos;
+        gameObject.layer = 7;
 
-                bool hasMeshRenderer = SupportExtrude.TryGetComponent<MeshRenderer>(out var meshRenderer);
-                if (hasMeshRenderer)
-                {
-                    meshRenderer.material = new Material(Shader.Find("Standard"));
-                }
-                SupportExtrude.Rebuild();
-            }
-        }
-            transform.position = pos;
-
+        // Manage Object's Click to Activate Flag(s)
         if (GetComponent<FlagSetter>() as FlagSetter != null) {
             GetComponent<FlagSetter>().TryTriggerFlag();
         }
-
-        RestoreMaterialsAndQueue();
     }
 
+    // Account for Click to Move Player. Wait a frame to reactivate Player's movement so they can still click to place an object
     private IEnumerator releaseOverrideNextFrame() {
         yield return null;
         PlayerClickMove.manualOverride = false;
     }
 
+    // Updates Held Object's position to the Mouse's Position
     private void MoveToMouse() {
         Vector3 mousePos = _mouseHitPoint;
-
         if (float.IsInfinity(mousePos.x) || float.IsInfinity(mousePos.y) || float.IsInfinity(mousePos.z)) return;
 
-        Vector3 target = (gridSize > 0) ? SnapToGrid(mousePos) : mousePos;
+        Vector3 target = (gridSize > 0) ? SnapToGrid(mousePos) : mousePos; // Check for if gridSize <= 0. If it is, just stay at Mouse Position
 
-        bool mouseOnGround = _mouseHitNormal.y > 0.7f;
+        bool mouseInsideXZ = // Check if Mouse's Position is still inside of Held Object's Bounds
+            (xLim == Vector2.zero || (mousePos.x >= xLim.x && mousePos.x <= xLim.y)) &&
+            (zLim == Vector2.zero || (mousePos.z >= zLim.x && mousePos.z <= zLim.y));
 
-        if (!verticallyDraggable) {
-            _canPlace = mouseOnGround;
 
-            if (mouseOnGround)
-                target.y = mousePos.y + _halfHeight + floatHeight;
-            else
-                target.y = transform.position.y;
-        } else {
-            _canPlace = true;
-            if (Keyboard.current.wKey.wasPressedThisFrame)
-            {
-                floatHeight += 2f;
-            }
-            else if (Keyboard.current.sKey.wasPressedThisFrame)
-            {
-                floatHeight -= 2f;
-            }
-            target.y = Mathf.Round((mousePos.y + _halfHeight + floatHeight) / gridSize) * gridSize;
+        if (Keyboard.current.wKey.wasPressedThisFrame && (floatHeight + 2f) < maxRaiseHeight) {
+            floatHeight += 2f;
+            Debug.Log("Added 2f height " + floatHeight);
+        }
+        if (Keyboard.current.sKey.wasPressedThisFrame && (floatHeight - 2f) > 0) {
+            floatHeight -= 2f;
+            Debug.Log("Reduced by 2f height " + floatHeight);
         }
 
-        target = ProjectToBounds(target);
+        if (!verticallyDraggable) {
+            if (mouseInsideXZ) {
+                _canPlaceObject = _mouseHitNormal.y > 0.7f;
+                target.y = Mathf.Round((mousePos.y + _halfHeldObjectHeight + floatHeight) / gridSize) * gridSize;
+            } else {
+                _canPlaceObject = true;
+                target.y = transform.position.y;
+            }
+        } else {
+            _canPlaceObject = true;
+            if (mouseInsideXZ) {
+                target.y = Mathf.Round((mousePos.y + _halfHeldObjectHeight + floatHeight) / gridSize) * gridSize;
+            } else {
+                target.y = transform.position.y;
+            }
+        }
 
+        target = ClampToBounds(target);
         transform.position = Vector3.Lerp(transform.position, target, Time.deltaTime * moveSmoothness);
     }
 
-
+    // Round Held Object's X & Z positions to match grid size
     private Vector3 SnapToGrid(Vector3 pos) {
         pos.x = Mathf.Round(pos.x / gridSize) * gridSize;
         pos.z = Mathf.Round(pos.z / gridSize) * gridSize;
         return pos;
     }
 
-
-    private void SetLayerRecursive(GameObject obj, int layer) {
-        obj.layer = layer;
-        foreach (Transform child in obj.transform)
-            SetLayerRecursive(child.gameObject, layer);
-    }
-
-
-    private Vector3 ProjectToBounds(Vector3 pos) {
-        Vector3 p = pos;
-
-        if (xLim != Vector2.zero)
-            p.x = Mathf.Clamp(p.x, xLim.x, xLim.y);
-
-        if (yLim != Vector2.zero)
-            p.y = Mathf.Clamp(p.y, yLim.x, yLim.y);
-
-        if (zLim != Vector2.zero)
-            p.z = Mathf.Clamp(p.z, zLim.x, zLim.y);
-
-        return p;
-    }
-
-
+    // 
     private void UpdateMouseHitPoint() {
         Ray ray = _camera.ScreenPointToRay(Mouse.current.position.ReadValue());
-        int mask = placementLayerMask & ~(1 << _heldLayer);
 
-        if (Physics.Raycast(ray, out RaycastHit hit, Mathf.Infinity, mask)) {
+        if (Physics.Raycast(ray, out RaycastHit hit, Mathf.Infinity, layerMask)) {
             _mouseHitPoint = hit.point;
             _mouseHitNormal = hit.normal;
             return;
@@ -291,35 +241,54 @@ public class ObjMove : MonoBehaviour {
         _mouseHitNormal = Vector3.up;
     }
 
+    //
+    void RenderOnTop() {
+        if (renderers == null || originalMaterials == null) return;
 
-    private void ApplySilhouetteAndOnTop() {
-        for (int i = 0; i < renderers.Length; i++) {
-            renderers[i].material = silhouetteMaterial;
-            renderers[i].material.renderQueue = 4000;
+        if (_isObjectHeld && !_canPlaceObject) {
+            // Use render-on-top material
+            for (int i = 0; i < renderers.Length; i++) {
+                var r = renderers[i];
+
+                // Build an array of the same length as original, but all using renderOnTopMaterial
+                Material[] mats = r.materials;
+                for (int j = 0; j < mats.Length; j++) {
+                    mats[j] = renderOnTopMaterial;
+                    mats[j].renderQueue = (int)queue + queueOffset;
+                }
+                r.materials = mats;
+            }
+        } else if (_isObjectHeld && _canPlaceObject) {
+            // Restore original materials
+            for (int i = 0; i < renderers.Length; i++) {
+                var r = renderers[i];
+                Material[] mats = r.materials;
+
+                // Ensure length matches; if not, recreate from cached originals
+                if (mats.Length != originalMaterials[i].Length) {
+                    mats = new Material[originalMaterials[i].Length];
+                }
+
+                for (int j = 0; j < originalMaterials[i].Length; j++) {
+                    mats[j] = originalMaterials[i][j];
+                    mats[j].renderQueue = (int)queue + queueOffset;
+                }
+
+                r.materials = mats;
+            }
         }
     }
 
-    private void RestoreMaterialsAndQueue() {
-        for (int i = 0; i < renderers.Length; i++) {
-            renderers[i].material = originalMaterials[i];
-            renderers[i].material.renderQueue = originalQueues[i];
-        }
-    }
+    // Render Line under object to ground to help judge its position
+    void DropLine() {
+        lr.startWidth = 0.03f;
+        lr.endWidth = 0.03f;
 
+        lr.positionCount = 2;
 
-    private void OnTriggerEnter(Collider other) {
-        if (!_isHeld) return;
+        lr.material = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
+        lr.material.color = Color.yellow;
 
-        if (other.GetComponentInParent<ObjMove>() == this) return;
-
-        overlapCount++;
-    }
-
-    private void OnTriggerExit(Collider other) {
-        if (!_isHeld) return;
-
-        if (other.GetComponentInParent<ObjMove>() == this) return;
-
-        overlapCount--;
+        lr.useWorldSpace = true;
     }
 }

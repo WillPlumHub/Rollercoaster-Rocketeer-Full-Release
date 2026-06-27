@@ -32,6 +32,24 @@
                     "processors": "",
                     "interactions": "",
                     "initialStateCheck": false
+                },
+                {
+                    "name": "wKey",
+                    "type": "Button",
+                    "id": "f7966034-4514-4630-a0f3-2fade1a12830",
+                    "expectedControlType": "",
+                    "processors": "",
+                    "interactions": "",
+                    "initialStateCheck": false
+                },
+                {
+                    "name": "sKey",
+                    "type": "Button",
+                    "id": "97681ea6-292c-457c-9c23-34d5138237dd",
+                    "expectedControlType": "",
+                    "processors": "",
+                    "interactions": "",
+                    "initialStateCheck": false
                 }
             ],
             "bindings": [
@@ -76,6 +94,28 @@
                     "processors": "",
                     "groups": "",
                     "action": "RMB Drag",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
+                    "id": "7d7808ae-e275-44f3-b081-b36390ecfae2",
+                    "path": "<Keyboard>/w",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "",
+                    "action": "wKey",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
+                    "id": "67f3311a-6427-461a-946c-e6429a588bdd",
+                    "path": "<Keyboard>/s",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "",
+                    "action": "sKey",
                     "isComposite": false,
                     "isPartOfComposite": false
                 }

@@ -1,28 +1,34 @@
 using System.Collections.Generic;
+using System.Linq;
 using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Splines;
 
 public class SplinePlacer : MonoBehaviour {
 
+    public GameObject curKart;
+    public TrackModHeader action;                // assign ScriptableObject mod
+
     public SplineContainer container;
 
-    public List<Vector3> knotPositions = new List<Vector3>();
+    public List<GameObject> knotPositions = new List<GameObject>();
+    
     public List<float3> knotTangentsIn = new List<float3>();
     public List<float3> knotTangentsOut = new List<float3>();
+    
+    public BezierKnot[] originalKnots;
 
     void Awake() {
         SyncListSizes();
-        AutoGenerateTangents();
         componentFinder();
 
         container = GetComponent<SplineContainer>();
 
-        var spline = container.AddSpline();
+        var spline = container.Spline;
         var knots = new BezierKnot[knotPositions.Count];
 
         for (int i = 0; i < knotPositions.Count; i++) {
-            Vector3 worldPos = transform.position + knotPositions[i];
+            Vector3 worldPos = knotPositions[i].transform.position;
             float3 local = (float3)container.transform.InverseTransformPoint(worldPos);
 
             knots[i] = new BezierKnot(
@@ -33,6 +39,7 @@ public class SplinePlacer : MonoBehaviour {
         }
 
         spline.Knots = knots;
+        originalKnots = knots.ToArray();
     }
 
     void componentFinder() {
@@ -63,29 +70,41 @@ public class SplinePlacer : MonoBehaviour {
             knotTangentsOut.RemoveAt(knotTangentsOut.Count - 1);
     }
 
-    void AutoGenerateTangents() {
-        float tension = 1f / 3f;
-        int count = knotPositions.Count;
-        if (count < 2) return;
+    public void BreakSpline(int index) {
+        var spline = container.Spline;
+        // Convert to array so we can slice it
+        var knots = spline.Knots.ToArray();
+        // Clamp index
+        index = Mathf.Clamp(index, 0, knots.Length);
+        // Create a new array with only the knots BEFORE the break point
+        var newKnots = knots.Take(index).ToArray();
+        // Assign back to the spline
+        spline.Knots = newKnots;
 
-        List<float3> pos = new List<float3>(count);
-        for (int i = 0; i < count; i++) {
-            pos.Add((float3)(transform.position + knotPositions[i]));
+        if (index <= 1) knotPositions[0].SetActive(false);
+    }
+    public void RepairSpline(int index) {
+        Debug.Log("STARTED");
+
+        if (index <= 1) knotPositions[0].SetActive(true);
+
+        var spline = container.Spline;
+        Debug.Log("SPLINE" + spline);
+        // Clamp index
+        index = Mathf.Clamp(index, 0, originalKnots.Length);
+        
+        // Restore the first `index` knots from the original
+        var restored = originalKnots.Take(originalKnots.Length).ToArray();
+
+        spline.Knots = restored;
+    }
+
+    public void TryTriggerMod() {
+        if (action == null) {
+            Debug.LogWarning("No TrackMod assigned.");
+            return;
         }
 
-        for (int i = 0; i < count; i++) {
-            float3 prev = (i == 0) ? pos[i] : pos[i - 1];
-            float3 next = (i == count - 1) ? pos[i] : pos[i + 1];
-            float3 current = pos[i];
-
-            float3 dirPrev = current - prev;
-            float3 dirNext = next - current;
-
-            if (math.lengthsq(knotTangentsIn[i]) == 0)
-                knotTangentsIn[i] = dirPrev * tension;
-
-            if (math.lengthsq(knotTangentsOut[i]) == 0)
-                knotTangentsOut[i] = dirNext * tension;
-        }
+        action.Activate(this, curKart);
     }
 }

@@ -1,4 +1,6 @@
-﻿using UnityEngine;
+﻿// Fix rotation when facing away from camera
+
+using UnityEngine;
 using UnityEngine.InputSystem;
 
 public class ObjRotation : MonoBehaviour {
@@ -23,9 +25,6 @@ public class ObjRotation : MonoBehaviour {
     public bool useRollLimits = false;
     public float minRoll = -45f;
     public float maxRoll = 45f;
-
-    [Header("Rotation Point")]
-    public Transform rotationPoint;
 
     private Camera _camera;
     private bool dragging = false;
@@ -119,11 +118,11 @@ public class ObjRotation : MonoBehaviour {
             rollAngle += rollDelta;
         }
 
-        Vector3 pivot = rotationPoint ? rotationPoint.position : transform.position;
+        Vector3 pivot = transform.position;
 
         // USE PIVOT AXES IF PIVOT EXISTS
-        Vector3 yawAxis = rotationPoint ? rotationPoint.up : transform.up;
-        Vector3 rollAxis = rotationPoint ? rotationPoint.forward : transform.forward;
+        Vector3 yawAxis = transform.up;
+        Vector3 rollAxis = transform.forward;
 
         transform.RotateAround(pivot, yawAxis, yawDelta);
         transform.RotateAround(pivot, rollAxis, rollDelta);
