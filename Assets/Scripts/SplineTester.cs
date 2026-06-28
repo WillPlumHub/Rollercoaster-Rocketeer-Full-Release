@@ -24,15 +24,6 @@ public class SplineTester : MonoBehaviour {
             placer.RepairSpline(testIndex);
             Debug.Log($"[SplineTester] Repaired spline to index {testIndex}");
         }
-
-        // Press Up/Down to change index
-        if (Input.GetKeyDown(KeyCode.UpArrow))
-            testIndex++;
-
-        if (Input.GetKeyDown(KeyCode.DownArrow))
-            testIndex--;
-
-        testIndex = Mathf.Clamp(testIndex, 0, 50);
     }
 
     void OnGUI() {
