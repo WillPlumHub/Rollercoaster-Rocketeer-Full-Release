@@ -75,7 +75,7 @@ public class ObjMove : MonoBehaviour {
             lr.SetPosition(1, end);
         }
 
-        Debug.Log("FloatHeight: " + floatHeight + "");
+        //Debug.Log("FloatHeight: " + floatHeight + "");
 
         RenderOnTop();
         UpdateMouseHitPoint();
