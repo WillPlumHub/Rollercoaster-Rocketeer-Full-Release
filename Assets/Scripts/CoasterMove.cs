@@ -27,6 +27,10 @@ public class CoasterMove : MonoBehaviour {
     public int curKnotIndex;
     //public int nextSpline;
 
+    [Header("Follow Kart Data")]
+    public List<KartFollower> followers = new List<KartFollower>();
+    public float spacing = 5f;
+
     [Header("Stupid Garbage")]
     private Rigidbody rb;
     public float currentSplineLength = -1f; // Cached, world-space length of currentSpline. -1 is signal this needs to be recached or spline aborted
@@ -126,12 +130,17 @@ public class CoasterMove : MonoBehaviour {
             if (curKnotIndex + 1 < currentSpline.Spline.Count - 1 && Vector3.Distance(nextKnotWorldPos, transform.position) < 0.1f) {
                 curKnotIndex++;
             }
+
+            for (int i = 0; i < followers.Count; i++) {
+                float offset = (i + 1) * spacing;
+                followers[i].Follow(GameObject.CoasterMove, offset);
+            }
         }
     }
 
     private void CacheSplineLength() {
         if (currentSpline != null) {
-            currentSplineLength = currentSpline.CalculateLength(); // world-space length, accounts for container transform
+            currentSplineLength = currentSpline.CalculateLength(); // World-space length, accounts for container transform
         } else {
             currentSplineLength = -1f;
         }
