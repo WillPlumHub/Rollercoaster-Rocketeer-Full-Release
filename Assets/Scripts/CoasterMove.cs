@@ -29,7 +29,7 @@ public class CoasterMove : MonoBehaviour {
 
     [Header("Stupid Garbage")]
     private Rigidbody rb;
-    private float currentSplineLength = -1f; // Cached, world-space length of currentSpline. -1 is signal this needs to be recached or spline aborted
+    public float currentSplineLength = -1f; // Cached, world-space length of currentSpline. -1 is signal this needs to be recached or spline aborted
     private Vector3 carriedForward = Vector3.forward; // Tangent direction used last frame, for parallel transport
     private bool carriedUpInitialized = false;
 
