@@ -243,7 +243,7 @@ public class ObjMove : MonoBehaviour {
 
     //
     void RenderOnTop() {
-        if (renderers == null || originalMaterials == null) return;
+        if (renderers == null || originalMaterials == null || renderOnTopMaterial == null) return;
 
         if (_isObjectHeld && !_canPlaceObject) {
             // Use render-on-top material
